@@ -1,23 +1,34 @@
 
-close all; clear all; clc;
-%% algorythm
-% %number of oscilators in each community
-% N = 30;
-% NumComm = 2;
-% totalN = NumComm*N;
+%% Synchronizing Mutiple Communities of Connected Oscilators
+% In this problem we attempt to find the minimum number of connections
+% required for synchronization of mutiple communites of mutally connected oscilators
+% The communities are organized according to the Kuramoto model*
 
-%time span
-T = 5;
-%number communities and number of oscilators in them
+%% Preparing the General Metrics for the Communities 
+
+%%
+% time span
+T = 50;
+dt = T/20;
+%%
+% number of communities
+N = 3;
+
+%%
+% maximum and minimum number of oscilators in each community
 minmemb = 30;
-maxmemb = 60;
-N = 2;%number of communitites
+maxmemb = 50;
+
+%% 
+% set the number of oscilators for each community
 NumMemb = zeros(1, N);
 for i = 1 : N
     NumMemb(i) = randi([minmemb maxmemb]);
 end;
+totalOsc = sum(NumMemb);
 
-%natural frequency for communities with random mean between 1 and 4
+%%
+% natural frequency for communities with random mean between 1 and 4
 globalW = [];
 for i = 1 : N
     freqMean = randi([1 4]);
@@ -25,18 +36,23 @@ for i = 1 : N
     globalW = [globalW; W];
 end;
 
-%Starting phases for communities
+%%
+% starting phases for communities
 globalTh = [];
 for i = 1 : N
     Th = 2*pi*rand(NumMemb(i), 1);
     globalTh = [globalTh; Th];
 end;
 
-
-%% creating adjecency matrices for each community
-%Probability of coupling
+%% Creating Adjecency Matrices for Each Community and Putting Them Together
+%%
+% probability of coupling
+%
+% probability of coupling will vary depending on whether we want to study
+% densly or loosely connected communitites
 Pk = 1;
-%Coupling - refelcts the connectivity and the value of coupling at each
+%%
+%Coupling - refelcts the connectivity and the value of coupling coeeficient at each
 %connection
 globalAdj = [];
 for i = 1 : N
@@ -45,70 +61,103 @@ for i = 1 : N
     NCoup =round(NumOsc^2*Pk);
     NnonCoup = NumOsc^2 - NCoup;
     %adejcency matrix 1
-    K1 = [20*rand(NCoup,1)+20; zeros(NnonCoup,1)];
+    K = [20*rand(NCoup,1)+20; zeros(NnonCoup,1)];
     % Generate a random index
     idx = randperm(NumOsc^2);
     % Select randomly and reshape
-    K1 = reshape(K1(idx),[NumOsc,NumOsc]);
-    %make an upper triangualr matrix in order for the resulting matrix to be
-    %symmetric
-    K1 = triu(K1, 1);
-    K1 = K1 + K1';
-    globalAdj = blkdiag(globalAdj, K1);
+    K = reshape(K(idx),[NumOsc,NumOsc]);
+    %make an upper triangualr matrix in order for the resulting matrix to be symmetric
+    K = triu(K, 1);
+    K = K + K';
+    globalAdj = blkdiag(globalAdj, K);
 end;
-globalAdj
-%% adding connections between communities
-totalOsc = sum(NumMemb);
-totalFilled = nnz(globalAdj)+totalOsc; %all the ones that are filled plus diagonal
-%numIterations = (totalOsc^2 - totalFilled)/2;
-numIterations = 400;
-lastThetas = zeros(totalOsc,numIterations);
-%randomly select memembers to be connected
-for i=1:numIterations
-    osc1 = randi([1 totalOsc]);
-    osc2 = randi([1 totalOsc]);
-    while globalAdj(osc1, osc2)~=0 || osc1 == osc2
-        osc1 = randi([1 totalOsc]);
-        osc2 = randi([1 totalOsc]);
+%%
+% plotting the inital state of the communities
+figure 
+pcolor(flipud(globalAdj))
+title('Intial State of Communities');
+xlabel('Oscilator indexes');
+ylabel('Oscilator indexes');
+%% Adding Connections Between Communities
+
+%data structure that collects mean Theta values at the end of time T
+%allowed for synchronization
+meanThetas = zeros(N,100);
+
+%start increasing the percentage of connections from 0 to 100
+for p=0.01:0.01:1
+    %establish the set of connection between all communities
+    if p == 0.3
+        globalAdjatP = globalAdj;
     end;
-    %pick coupling strength
-    Coupling_strength = 20*rand(1,1)+20;
-    %connect preserving symmentry
-    globalAdj(osc1, osc2) = Coupling_strength;
-    globalAdj(osc2, osc1) = Coupling_strength;
-    %integrate for span T
-    %pedro
-    %[time, theta] = kuramoto(globalTh,globalAdj,globalW, [0:0.4:T]);
-    dt = T/20;
+    for j = 1:N
+        %connect communities K with communities J
+        for k = j+1:N
+            %create the adjecency matrix for 2 communities
+            numRows = NumMemb(j);
+            numColumns = NumMemb(k);
+            numElements = numRows*numColumns;
+            CoupDiag = zeros(numRows,numColumns);
+            %number of nonzero elements
+            NCoup =round(numElements*p);
+            %number of zero elements
+            NnonCoup = numElements - NCoup;
+            % generate a vector with an appropriate number of sero and
+            % nonzero entries
+            K = [20*rand(NCoup,1)+20; zeros(NnonCoup,1)];
+            %Generate a random index
+            idx = randperm(numElements);
+            %Select randomly and reshape
+            K = reshape(K(idx),[numRows,numColumns]);
+            %put te new matrix into the appropriate place in the adjencency
+            %matrix
+            if j == 1
+                startRow = 1;
+            else
+                startRow = sum(NumMemb(1:(j-1)))+1; 
+            end;
+            endRow = sum(NumMemb(1:j));
+            startColumn = sum(NumMemb(1:(k-1)))+1;
+            endColumn = sum(NumMemb(1:(k)));  
+            globalAdj(startRow:endRow, startColumn:endColumn) = K;
+            globalAdj(startColumn:endColumn, startRow:endRow)  = K';
+        end;
+    end;
+    
+    
+    %integrate the resulting matrix for T
     [time, theta] = ode45('Theta_rhs_K_inside', [0:dt:T], globalTh, [], globalW, globalAdj, totalOsc);
+    %calculate the mean value of last theta for each group
     theta = theta';
     theta = mod(theta, 2*pi);
-    lastThetas(:,i) = theta(:, end);
-    %save the last value of theta
-    
+    lastTheta = theta (:, end);
+    means = zeros(N, 1);
+    startIndex = 1;
+    for l = 1:N
+        means(l) = mean(lastTheta(startIndex:sum(NumMemb(1:l))));
+        startIndex = sum(NumMemb(1:l));
+    end;
+    meanThetas(:, int32(p*100)) = means;
 end;
-std_of_thetas = std(lastThetas);
-num_connections = [1:numIterations];
-plot (num_connections, std_of_thetas);
-xlabel('Number of Connections');
-time_label = int2str(time(end));
-ylabel(['Std at the end of time span',' ',time_label]);
-title([int2str(N),' ','communities',' ', mat2str(NumMemb),' ','-members']);
-% %% integrating
-% [time, theta] = ode45('Theta_rhs_K_inside', [0:0.4:T], globalTh, [], globalW, globalAdj, NumComm*N);
-% theta = mod(theta, 2*pi);
-% theta = theta';
-% olgaPlot(theta(1:N, :), time);
-% olgaPlot(theta(N+1:2*N, :), time);
-% olgaPlot(theta, time);
 
-% %% pedro test
-% [time_pedro,theta_pedro] = kuramoto(Th,K1,W, [0:20:400]);
-% theta = mod(theta, 2*pi);
-% theta = theta';
-% theta_pedro = mod(theta_pedro, 2*pi);
-% theta_pedro = theta_pedro
-% olgaPlot(theta_pedro, time_pedro)
+%%
+% visualization of communities at 30% connectivity between communities
+figure
+pcolor(flipud(globalAdjatP))
+title('Communitites at 30% connection');
+xlabel('Oscilator indexes');
+ylabel('Oscilator indexes');
+
+%% plotting
+%seprate the thetas into different communities and compute their mean
+percent_connections = [0.01:0.01:1];
+figure
+plot (percent_connections, meanThetas);
+xlabel('Percentage of Connections');
+time_label = int2str(T);
+ylabel(['Mean thetas of communities at the end of',' ',time_label]);
+title([int2str(N),' ','communities',' ', mat2str(NumMemb),' ','-members']);
+
 
 
 
